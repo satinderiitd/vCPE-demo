@@ -1,0 +1,467 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.3/types.yaml
+  - plugin:cloudify-openstack-plugin
+  - plugin:cloudify-utilities-plugin
+  - plugin:cloudify-fabric-plugin
+
+inputs:
+
+  #webserver_port:
+  #  description: The HTTP web server port
+  #  default: 8080
+
+
+  server_subnet_cidr:
+    default: 10.10.0.0/24
+
+  #server_subnet_allocation_pools:
+  #  default:
+  #  - start: 10.10.0.2
+  #    end: 10.10.0.254
+
+  client_subnet_cidr:
+    default: 10.10.1.0/24
+
+  #client_subnet_allocation_pools:
+  #  default:
+  #  - start: 10.10.1.2
+  #    end: 10.10.1.254
+
+
+dsl_definitions:
+
+  openstack_config: &openstack_config
+    username: { get_secret: keystone_username }
+    password: { get_secret: keystone_password }
+    tenant_name: { get_secret: keystone_tenant_name }
+    auth_url: { get_secret: keystone_url }
+    region: { get_secret: keystone_region }
+
+node_templates:
+
+
+  server_network:
+    type: cloudify.openstack.nodes.Network
+    properties:
+      openstack_config: *openstack_config
+
+  client_network:
+    type: cloudify.openstack.nodes.Network
+    properties:
+      openstack_config: *openstack_config
+
+  management_network:
+    type: cloudify.openstack.nodes.Network
+    properties:
+      openstack_config: *openstack_config
+      use_external_resource: true
+      resource_id: { get_secret: orchestration-network-id }
+    relationships:
+
+  server_subnet:
+    type: cloudify.openstack.nodes.Subnet
+    properties:
+      openstack_config: *openstack_config
+      subnet:
+        ip_version: 4
+        cidr: { get_input: server_subnet_cidr }
+        #dns_nameservers: [8.8.4.4, 8.8.8.8]
+        #allocation_pools: { get_input: server_subnet_allocation_pools }
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: server_network
+
+  client_subnet:
+    type: cloudify.openstack.nodes.Subnet
+    properties:
+      openstack_config: *openstack_config
+      subnet:
+        ip_version: 4
+        cidr: { get_input: client_subnet_cidr }
+        #dns_nameservers: [8.8.4.4, 8.8.8.8]
+        #allocation_pools: { get_input: client_subnet_allocation_pools }
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: client_network
+
+  management_subnet:
+    type: cloudify.openstack.nodes.Subnet
+    properties:
+      openstack_config: *openstack_config
+      use_external_resource: true
+      resource_id: { get_secret: orchestration-subnet-id }
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: management_network
+
+
+  orch_port_server:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: management_network
+    - type: cloudify.relationships.depends_on
+      target: management_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+    - type: cloudify.openstack.port_connected_to_floating_ip
+      target: server_fl_ip
+
+  orch_port_client:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: management_network
+    - type: cloudify.relationships.depends_on
+      target: management_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+    - type: cloudify.openstack.port_connected_to_floating_ip
+      target: client_fl_ip
+
+  orch_port_router:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: management_network
+    - type: cloudify.relationships.depends_on
+      target: management_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+    - type: cloudify.openstack.port_connected_to_floating_ip
+      target: router_fl_ip
+
+  server_port:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+      port:
+        allowed_address_pairs: 
+        - ip_address: '0.0.0.0/0'
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: server_network
+    - type: cloudify.relationships.depends_on
+      target: server_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+
+  server_router_port:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+      port:
+        allowed_address_pairs: 
+        - ip_address: '0.0.0.0/0'
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: server_network
+    - type: cloudify.relationships.depends_on
+      target: server_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+
+  client_port:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+      port:
+        allowed_address_pairs: 
+        - ip_address: '0.0.0.0/0'
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: client_network
+    - type: cloudify.relationships.depends_on
+      target: client_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+
+  client_router_port:
+    type: cloudify.openstack.nodes.Port
+    properties:
+      openstack_config: *openstack_config
+      port:
+        allowed_address_pairs: 
+        - ip_address: '0.0.0.0/0'
+    relationships:
+    - type: cloudify.relationships.contained_in
+      target: client_network
+    - type: cloudify.relationships.depends_on
+      target: client_subnet
+    - type: cloudify.openstack.port_connected_to_security_group
+      target: security_group
+
+  security_group:
+    type: cloudify.openstack.nodes.SecurityGroup
+    properties:
+      openstack_config: *openstack_config
+      use_external_resource: true
+      resource_id: { get_secret: default-security-group-id }
+    relationships:
+
+
+  server_fl_ip:
+    type: cloudify.openstack.nodes.FloatingIP
+    properties:
+      openstack_config: *openstack_config
+      floatingip:
+        floating_network_id: { get_secret: floating-network-id }
+    relationships:
+
+  client_fl_ip:
+    type: cloudify.openstack.nodes.FloatingIP
+    properties:
+      openstack_config: *openstack_config
+      floatingip:
+        floating_network_id: { get_secret: floating-network-id }
+    relationships:
+
+  router_fl_ip:
+    type: cloudify.openstack.nodes.FloatingIP
+    properties:
+      openstack_config: *openstack_config
+      floatingip:
+        floating_network_id: { get_secret: floating-network-id }
+    relationships:
+
+  #http_web_server:
+  #  type: cloudify.nodes.WebServer
+  #  properties:
+  #    port: { get_input: webserver_port }
+  #  relationships:
+  #    - type: cloudify.relationships.contained_in
+  #      target: server_host
+  #  interfaces:
+  #    cloudify.interfaces.lifecycle:
+  #      start: scripts/start.sh
+  #      stop: scripts/stop.sh
+
+  server_host:
+    type: cloudify.openstack.nodes.Server
+    properties:
+      openstack_config: *openstack_config
+      agent_config:
+        #network: { get_input: manager_network }
+        user: { get_secret: agent_user }
+        install_method: init_script
+        port: 22
+        key: { get_secret: agent_key_private }
+      server:
+        meta:
+          blueprint_version: v1
+        key_name: 'greg-key'
+        image: { get_secret: ubuntu_image }
+        flavor: { get_secret: medium_flavor }
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: openstack.nova_plugin.server.create
+          inputs:
+            args:
+              meta:
+                blueprint_version: v1
+              image: { get_secret: ubuntu_image }
+              flavor: { get_secret: medium_flavor }
+              userdata: { get_attribute: [ cloudify_host_cloud_config_server, cloud_config ] }
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: management_network
+    - type: cloudify.openstack.server_connected_to_port
+      target: orch_port_server
+    - type: cloudify.relationships.depends_on
+      target: server_network
+    - type: cloudify.openstack.server_connected_to_port
+      target: server_port
+    - type: cloudify.relationships.depends_on
+      target: cloudify_host_cloud_config_server
+    - type: cloudify.relationships.depends_on
+      target: router_host
+
+
+  client_host:
+    type: cloudify.openstack.nodes.Server
+    properties:
+      openstack_config: *openstack_config
+      agent_config:
+        #network: { get_input: manager_network }
+        user: { get_secret: agent_user }
+        install_method: init_script
+        port: 22
+        key: { get_secret: agent_key_private }
+      server:
+        meta:
+          blueprint_version: v1
+        key_name: 'greg-key'
+        image: { get_secret: ubuntu_image }
+        flavor: { get_secret: medium_flavor }
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: openstack.nova_plugin.server.create
+          inputs:
+            args:
+              meta:
+                blueprint_version: v1
+              image: { get_secret: ubuntu_image }
+              flavor: { get_secret: medium_flavor }
+              userdata: { get_attribute: [ cloudify_host_cloud_config_client, cloud_config ] }
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: management_network
+    - type: cloudify.openstack.server_connected_to_port
+      target: orch_port_client
+    - type: cloudify.relationships.depends_on
+      target: client_network
+    - type: cloudify.openstack.server_connected_to_port
+      target: client_port
+    - type: cloudify.relationships.depends_on
+      target: cloudify_host_cloud_config_client
+    - type: cloudify.relationships.depends_on
+      target: router_host
+
+  
+  router_host:
+    type: cloudify.openstack.nodes.Server
+    properties:
+      openstack_config: *openstack_config
+      agent_config:
+        #network: { get_input: manager_network }
+        user: 'cumulus'
+        install_method: none
+        port: 22
+        key: { get_secret: agent_key_private }
+      server:
+        meta:
+          blueprint_version: v1
+        key_name: 'greg-key'
+        image: { get_secret: cumulus_router_image }
+        flavor: { get_secret: large_flavor }
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: openstack.nova_plugin.server.create
+          inputs:
+            args:
+              meta:
+                blueprint_version: v1
+              image: { get_secret: cumulus_router_image }
+              flavor: { get_secret: large_flavor }
+              userdata: { get_attribute: [ cloudify_host_cloud_config_router, cloud_config ] }
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: management_network
+    - type: cloudify.openstack.server_connected_to_port
+      target: orch_port_router
+    - type: cloudify.relationships.depends_on
+      target: client_network
+    - type: cloudify.openstack.server_connected_to_port
+      target: client_router_port
+    - type: cloudify.openstack.server_connected_to_port
+      target: server_router_port
+    - type: cloudify.relationships.depends_on
+      target: cloudify_host_cloud_config_router
+
+
+  router_config:
+    type: cloudify.nodes.Root
+    interfaces:
+      cloudify.interfaces.lifecycle:
+          start:
+            implementation: fabric.fabric_plugin.tasks.run_commands
+            inputs:
+              commands:
+              - touch /home/cumulus/cumulus_config
+              - echo 'Configuring cumulus static routing' >> /home/cumulus/cumulus_config
+              - net add interface swp1
+              - net add interface swp2
+              - {concat: ['net add interface swp1 ip address ', {get_attribute: [client_router_port, fixed_ip_address]}, '/24']}
+              - {concat: ['net add interface swp2 ip address ', {get_attribute: [server_router_port, fixed_ip_address]}, '/24']}
+              - net commit
+              # if `use_sudo` is omitted, it defaults to `false`
+              use_sudo: true
+              fabric_env:
+                host_string: { get_attribute: [ orch_port_router, fixed_ip_address ]}
+                user: cumulus
+                password: CumulusLinux!
+                #sudo_prefix: 'mysudo -c'
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: router_host
+
+
+  cloudify_host_cloud_config_router:
+    type: cloudify.nodes.CloudInit.CloudConfig
+    properties:
+      resource_config:
+        manage_etc_hosts: True
+        users:
+          - name: 'cumulus'
+            shell: /bin/bash
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            ssh-authorized-keys:
+              - { get_secret: agent_key_public }
+        runcmd:
+
+  cloudify_host_cloud_config_client:
+    type: cloudify.nodes.CloudInit.CloudConfig
+    properties:
+      resource_config:
+        manage_etc_hosts: True
+        users:
+          - name: { get_secret: agent_user }
+            shell: /bin/bash
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            ssh-authorized-keys:
+              - { get_secret: agent_key_public }
+        runcmd:
+         - 'export https_proxy=http://webproxy.lon.corp.services:80'
+         - 'export http_proxy=http://webproxy.lon.corp.services:80'
+         - 'export no_proxy=localhost,127.0.0.1,localaddress,192.168.100.15'
+         - 'dhclient'
+         - { concat: ['sudo route add -net ', {get_input: server_subnet_cidr},'  gw ', {get_attribute: [client_router_port, fixed_ip_address]} ]} 
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: client_router_port
+
+  cloudify_host_cloud_config_server:
+    type: cloudify.nodes.CloudInit.CloudConfig
+    properties:
+      resource_config:
+        manage_etc_hosts: True
+        users:
+          - name: { get_secret: agent_user }
+            shell: /bin/bash
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            ssh-authorized-keys:
+              - { get_secret: agent_key_public }
+        runcmd:
+         - 'export https_proxy=http://webproxy.lon.corp.services:80'
+         - 'export http_proxy=http://webproxy.lon.corp.services:80'
+         - 'export no_proxy=localhost,127.0.0.1,localaddress,192.168.100.15'
+         - 'dhclient'
+         - { concat: ['sudo route add -net ', {get_input: client_subnet_cidr},'  gw ', {get_attribute: [server_router_port, fixed_ip_address]} ]}
+    relationships:
+    - type: cloudify.relationships.depends_on
+      target: server_router_port
+
+
+outputs:
+
+  server_public_endpoint:
+    description: 'The public ip address of the server PE'
+    value: { get_attribute: [server_fl_ip, floating_ip_address] }
+  client_public_endpoint:
+    description: 'The ip address of the client CPE'
+    value: { get_attribute: [client_fl_ip, floating_ip_address] }
+  router_public_endpoint:
+    description: 'The ip address of the router VNF'
+    value: { get_attribute: [router_fl_ip, floating_ip_address] }

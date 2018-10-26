@@ -1,9 +1,0 @@
-rest_calls:
-  - path: /wapi/v2.7/network?*Site={{SITE}}
-    method: GET
-    headers:
-      accept: application/json
-    payload:
-    response_format: json
-    recoverable_codes: [400]
-    response_translation: [network]

@@ -1,0 +1,11 @@
+rest_calls:
+  - path: /wapi/v2.7/network?_return_fields%2B=network,extattrs&_return_as_object=1
+    method: POST
+    headers:
+      accept: application/json
+    payload:
+      network: 'func:nextavailablenetwork:{{NETWORK}},24'
+      extattrs: {"Site": {"value": '{{VCPENAME}}'}}
+    #response_format: json
+    recoverable_codes: [400]
+    response_translation: [result]

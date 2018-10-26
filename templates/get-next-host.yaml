@@ -1,0 +1,17 @@
+rest_calls:
+  - path: /wapi/v2.7/record:host?_return_fields%2B=name,ipv4addrs&_return_as_object=1
+    method: POST
+    headers:
+      accept: application/json
+    payload:
+      name: '{{NAME}}.cpe.refinitiv.com'
+      ipv4addrs:
+        - ipv4addr: 'func:nextavailableip:{{NETWORK}}'
+
+        #[{"ipv4addr":'func:nextavailableip:'{{NETWORK}}}]}
+      #extattrs: 
+      #  Site: 
+      #    value: '{{VCPE-NAME}}'
+    #response_format: json
+    recoverable_codes: [400]
+    response_translation: [result]

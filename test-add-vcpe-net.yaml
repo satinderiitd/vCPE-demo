@@ -1,0 +1,183 @@
+tosca_definitions_version: cloudify_dsl_1_3
+
+imports:
+  - http://www.getcloudify.org/spec/cloudify/4.3/types.yaml
+  - plugin:cloudify-utilities-plugin
+  #- imports/cloud-config.yaml
+
+inputs:
+
+  vCPE-NAME:
+    default: 'vCPETest'
+
+  PE_host_site:
+    default: 'DTC_PE_demo'
+
+
+node_templates:
+
+  PE_net:
+    type: cloudify.rest.Requests
+    properties:
+      hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
+      port: 443
+      ssl: true
+      verify: false
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/get-net.yaml"
+            params:
+              SITE: {get_input: PE_host_site}
+    relationships:
+
+  cpe_to_router_net:
+    type: cloudify.rest.Requests
+    properties:
+      hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
+      port: 443
+      ssl: true
+      verify: false
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/get-net-container.yaml"
+            params:
+              SITE: "Router"
+        configure:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/create-cpe-net.yaml"
+            params:
+              NETWORK: { get_attribute: [ SELF , result_propeties, network, 0, network] }
+              VCPENAME: {concat: [get_input: vCPE-NAME, '_Router-Net']}
+        delete:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/delete-cpe-net.yaml"
+            params:
+              SUBNETWORK: { get_attribute: [ SELF , result_propeties, result] }
+    relationships:
+
+  router_to_fw_net:
+    type: cloudify.rest.Requests
+    properties:
+      hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
+      port: 443
+      ssl: true
+      verify: false
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/get-net-container.yaml"
+            params:
+              SITE: "Firewall"
+        configure:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/create-cpe-net.yaml"
+            params:
+              NETWORK: { get_attribute: [ SELF , result_propeties, network, 0, network] }
+              VCPENAME: {concat: [get_input: vCPE-NAME, '_Firewall-Net']}
+        delete:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/delete-cpe-net.yaml"
+            params:
+              SUBNETWORK: { get_attribute: [ SELF , result_propeties, result] }
+    relationships:
+
+
+  vcpe-client-ip:
+    type: cloudify.rest.Requests
+    properties:
+      hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
+      port: 443
+      ssl: true
+      verify: false
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/get-next-host.yaml"
+            params:
+              NETWORK: { get_attribute: [ cpe_to_router_net , result_propeties, result, result, _ref] }
+              NAME: {concat: [get_input: vCPE-NAME, '_Client']}
+        delete:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/delete-host.yaml"
+            params:
+              HOST: { get_attribute: [ SELF , result_propeties, result, result, _ref] }    
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: cpe_to_router_net
+
+  router-client-net-ip:
+    type: cloudify.rest.Requests
+    properties:
+      hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
+      port: 443
+      ssl: true
+      verify: false
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/get-next-host.yaml"
+            params:
+              NETWORK: { get_attribute: [ cpe_to_router_net , result_propeties, result, result, _ref] }
+              NAME: {concat: [get_input: vCPE-NAME, '_Client_to_vRouter']}
+        delete:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/delete-host.yaml"
+            params:
+              HOST: { get_attribute: [ SELF , result_propeties, result, result, _ref] }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: cpe_to_router_net
+
+  router-PE-net-ip:
+    type: cloudify.rest.Requests
+    properties:
+      hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
+      port: 443
+      ssl: true
+      verify: false
+    interfaces:
+      cloudify.interfaces.lifecycle:
+        create:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/get-next-host.yaml"
+            params:
+              NETWORK: { get_attribute: [ PE_net , result_propeties, network, 0, network] }
+              NAME: {concat: [get_input: vCPE-NAME, '_vRouter_to_PE']}
+        delete:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/delete-host.yaml"
+            params:
+              HOST: { get_attribute: [ SELF , result_propeties, result, result, _ref] }
+    relationships:
+      - type: cloudify.relationships.depends_on
+        target: PE_net
+
+
+outputs:
+
+  vcpe_client_net_ip:
+    value: { get_attribute: [ vcpe-client-ip , result_propeties, result, result, ipv4addrs, 0, ipv4addrs] }
+  router_client_net_ip: 
+    value: { get_attribute: [ router-client-net-ip , result_propeties, result, result, ipv4addrs, 0, ipv4addrs] }
+  router_PE_net_ip: 
+    value: { get_attribute: [ router-PE-net-ip , result_propeties, result, result, ipv4addrs, 0, ipv4addrs] }

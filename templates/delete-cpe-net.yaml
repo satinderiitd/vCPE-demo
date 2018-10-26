@@ -1,0 +1,8 @@
+rest_calls:
+  - path: /wapi/v2.7/{{SUBNETWORK}}
+    method: DELETE
+    headers:
+      accept: application/json
+    #response_format: json
+    recoverable_codes: [400]
+    response_translation: [result]

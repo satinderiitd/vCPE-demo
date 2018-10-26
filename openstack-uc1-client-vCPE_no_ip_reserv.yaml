@@ -84,8 +84,7 @@ node_templates:
               SUBNETWORK: { get_attribute: [ SELF , result_propeties, result, result, _ref] }
     relationships:
 
-
-  cpe-to-router-net-gateway-ip:
+  router_to_fw_net:
     type: cloudify.rest.Requests
     properties:
       hosts: [{ concat: [ 'admin', ':','infoblox','@',{ get_secret: infoblox_public_endpoint } ]} ]
@@ -97,21 +96,23 @@ node_templates:
         create:
           implementation: rest.cloudify_rest.tasks.execute
           inputs:
-            template_file: "templates/get-next-host.yaml"
+            template_file: "templates/get-net-container.yaml"
             params:
-              NETWORK: { get_attribute: [ cpe_to_router_net , result_propeties, result, result, _ref] }
-              NAME: {concat: [get_input: vCPE-NAME, '_ClientGateway']}
+              SITE: "Firewall"
+        configure:
+          implementation: rest.cloudify_rest.tasks.execute
+          inputs:
+            template_file: "templates/create-cpe-net.yaml"
+            params:
+              NETWORK: { get_attribute: [ SELF , result_propeties, network, 0, network] }
+              VCPENAME: {concat: [get_input: vCPE-NAME, '_Firewall-Net']}
         delete:
           implementation: rest.cloudify_rest.tasks.execute
           inputs:
-            template_file: "templates/delete-host.yaml"
+            template_file: "templates/delete-cpe-net.yaml"
             params:
-              HOST: { get_attribute: [ SELF , result_propeties, result, result, _ref] }    
+              SUBNETWORK: { get_attribute: [ SELF , result_propeties, result, result, _ref] }
     relationships:
-    - type: cloudify.relationships.depends_on
-      target: cpe_to_router_net
-    - type: cloudify.relationships.depends_on
-      target: client_subnet
 
 
   vcpe-client-ip:
@@ -137,10 +138,8 @@ node_templates:
             params:
               HOST: { get_attribute: [ SELF , result_propeties, result, result, _ref] }    
     relationships:
-    - type: cloudify.relationships.depends_on
-      target: cpe_to_router_net
-    - type: cloudify.relationships.depends_on
-      target: cpe-to-router-net-gateway-ip
+      - type: cloudify.relationships.depends_on
+        target: cpe_to_router_net
 
   router-client-net-ip:
     type: cloudify.rest.Requests
@@ -165,10 +164,8 @@ node_templates:
             params:
               HOST: { get_attribute: [ SELF , result_propeties, result, result, _ref] }
     relationships:
-    - type: cloudify.relationships.depends_on
-      target: cpe_to_router_net
-    - type: cloudify.relationships.depends_on
-      target: cpe-to-router-net-gateway-ip
+      - type: cloudify.relationships.depends_on
+        target: cpe_to_router_net
 
   router-PE-net-ip:
     type: cloudify.rest.Requests
@@ -280,8 +277,7 @@ node_templates:
       port:
         allowed_address_pairs: 
         - ip_address: '0.0.0.0/0'
-        fixed_ips: 
-        - ip_address: {get_attribute: [router-PE-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
+      fixed_ip: {get_attribute: [router-PE-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
     relationships:
     - type: cloudify.relationships.contained_in
       target: server_network
@@ -297,15 +293,12 @@ node_templates:
       port:
         allowed_address_pairs: 
         - ip_address: '0.0.0.0/0'
-        fixed_ips: 
-        - ip_address: {get_attribute: [vcpe-client-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]} 
+      fixed_ip: {get_attribute: [vcpe-client-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]} 
     relationships:
     - type: cloudify.relationships.contained_in
       target: client_network
-    #- type: cloudify.relationships.depends_on
-    #  target: client_subnet
     - type: cloudify.relationships.depends_on
-      target: cpe-to-router-net-gateway-ip
+      target: client_subnet
     - type: cloudify.openstack.port_connected_to_security_group
       target: security_group
     - type: cloudify.relationships.depends_on
@@ -318,15 +311,12 @@ node_templates:
       port:
         allowed_address_pairs: 
         - ip_address: '0.0.0.0/0'
-        fixed_ips: 
-        - ip_address: {get_attribute: [router-client-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
+      fixed_ip: {get_attribute: [router-client-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
     relationships:
     - type: cloudify.relationships.contained_in
       target: client_network
-    #- type: cloudify.relationships.depends_on
-    #  target: client_subnet
     - type: cloudify.relationships.depends_on
-      target: cpe-to-router-net-gateway-ip
+      target: client_subnet
     - type: cloudify.openstack.port_connected_to_security_group
       target: security_group
     - type: cloudify.relationships.depends_on
@@ -358,7 +348,18 @@ node_templates:
         floating_network_id: { get_secret: floating-network-id }
     relationships:
 
-  
+  #http_web_server:
+  #  type: cloudify.nodes.WebServer
+  #  properties:
+  #    port: { get_input: webserver_port }
+  #  relationships:
+  #    - type: cloudify.relationships.contained_in
+  #      target: server_host
+  #  interfaces:
+  #    cloudify.interfaces.lifecycle:
+  #      start: scripts/start.sh
+  #      stop: scripts/stop.sh
+
   server_host:
     type: cloudify.openstack.nodes.Server
     properties:
@@ -393,9 +394,6 @@ node_templates:
         key_name: 'greg-key'
         image: { get_secret: ubuntu_image }
         flavor: { get_secret: medium_flavor }
-        #networks:
-        #- uuid: {get_attribute: [client_network, external_id]}
-        #  fixed_ip: {get_attribute: [vcpe-client-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
     interfaces:
       cloudify.interfaces.lifecycle:
         create:
@@ -438,13 +436,6 @@ node_templates:
         key_name: 'greg-key'
         image: { get_secret: cumulus_router_image }
         flavor: { get_secret: large_flavor }
-        #networks:
-        #- uuid: {get_attribute: [client_network, external_id]}
-        #  fixed_ip: {get_attribute: [router-client-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
-        #- uuid: {get_attribute: [server_network, external_id]}
-        #  fixed_ip: {get_attribute: [router-PE-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}
-        #- port: {get_attribute: [client_router_port, external_id]}
-        #- port: {get_attribute: [server_router_port, external_id]}
     interfaces:
       cloudify.interfaces.lifecycle:
         create:
@@ -483,8 +474,8 @@ node_templates:
               - echo 'Configuring cumulus static routing' >> /home/cumulus/cumulus_config
               - net add interface swp1
               - net add interface swp2
-              - {concat: ['net add interface swp1 ip address ', {get_attribute: [router-client-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}, '/24']}
-              - {concat: ['net add interface swp2 ip address ', {get_attribute: [router-PE-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}, '/24']}
+              - {concat: ['net add interface swp1 ip address ', {get_attribute: [client_router_port, fixed_ip_address]}, '/24']}
+              - {concat: ['net add interface swp2 ip address ', {get_attribute: [server_router_port, fixed_ip_address]}, '/24']}
               - net commit
               # if `use_sudo` is omitted, it defaults to `false`
               use_sudo: true
@@ -506,7 +497,7 @@ node_templates:
             implementation: fabric.fabric_plugin.tasks.run_commands
             inputs:
               commands:
-              - { concat: ['route add -net ', {get_attribute: [cpe_to_router_net, result_propeties, result, result, network ] },'  gw ', {get_attribute: [router-PE-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]} ]}
+              - { concat: ['route add -net ', {get_attribute: [cpe_to_router_net, result_propeties, result, result, network ] },'  gw ', {get_attribute: [server_router_port, fixed_ip_address]} ]}
               # if `use_sudo` is omitted, it defaults to `false`
               use_sudo: true
               fabric_env:
@@ -562,12 +553,10 @@ node_templates:
          - 'export http_proxy=http://webproxy.lon.corp.services:80'
          - 'export no_proxy=localhost,127.0.0.1,localaddress,192.168.100.15'
          - 'dhclient'
-         - { concat: ['sudo ip addr add ', {get_attribute: [vcpe-client-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]} , '/24 dev eth1']}
-         - { concat: ['sudo ip route add default via ',{get_attribute: [cpe-to-router-net-gateway-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]}]}
-         - { concat: ['sudo route add -net ', {get_attribute: [PE_net, result_propeties, network, 0, network]},'  gw ', {get_attribute: [router-client-net-ip, result_propeties, result, result, ipv4addrs, 0, ipv4addr]} ]} 
+         - { concat: ['sudo route add -net ', {get_attribute: [PE_net, result_propeties, network, 0, network]},'  gw ', {get_attribute: [client_router_port, fixed_ip_address]} ]} 
     relationships:
     - type: cloudify.relationships.depends_on
-      target: router-client-net-ip
+      target: client_router_port
     - type: cloudify.relationships.depends_on
       target: router_host
 
@@ -578,9 +567,9 @@ outputs:
   client_public_endpoint:
     description: 'The ip address of the client CPE'
     value: { get_attribute: [client_fl_ip, floating_ip_address] }
-  #client_private_endpoint:
-  #  description: 'The private ip address of the client CPE'
-  #  value: { get_attribute: [client_port, fixed_ip_address] }
+  client_private_endpoint:
+    description: 'The private ip address of the client CPE'
+    value: { get_attribute: [client_port, fixed_ip_address] }
   router_public_endpoint:
     description: 'The ip address of the router VNF'
     value: { get_attribute: [router_fl_ip, floating_ip_address] }
